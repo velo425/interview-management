@@ -21,15 +21,13 @@ const INTERVIEW_SELECT = `
   job_title,
   company_name,
   meeting_link,
-  booking_note,
   stage,
+  attendance,
   result,
   video_path,
   reminder_minutes,
   google_event_id,
-  google_calendar_id,
   gmail_account_id,
-  google_html_link,
   google_event_data,
   source,
   start_time,
@@ -101,7 +99,7 @@ export function interviewOrganizerParts(interview) {
 
 export function interviewOrganizerLabel(interview) {
   const { name, email } = interviewOrganizerParts(interview);
-  if (name && email) return `${name} <${email}>`;
+  if (name && email) return `${name}(${email})`;
   return name || email;
 }
 
@@ -113,7 +111,7 @@ export function interviewAttendeeLabels(interview) {
       if (!attendee || typeof attendee !== 'object') return '';
       const name = String(attendee.displayName || '').trim();
       const email = String(attendee.email || '').trim();
-      const base = name && email ? `${name} <${email}>` : name || email;
+      const base = name && email ? `${name}(${email})` : name || email;
       if (!base) return '';
       const status = String(attendee.responseStatus || '').trim();
       return status ? `${base} (${status})` : base;
@@ -204,19 +202,36 @@ export async function fetchJobs() {
   return data || [];
 }
 
+const INTERVIEW_SELECT_WITHOUT_ATTENDANCE = INTERVIEW_SELECT.replace(
+  /^\s*attendance,\s*$/m,
+  '',
+);
+
+function isMissingAttendanceColumn(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('attendance') && message.includes('column');
+}
+
 export async function fetchInterviews({ from, to, callerOnlyId } = {}) {
-  let query = supabase
-    .from('interviews')
-    .select(INTERVIEW_SELECT)
-    .order('start_time', { ascending: true });
+  async function run(select) {
+    let query = supabase
+      .from('interviews')
+      .select(select)
+      .order('start_time', { ascending: true });
 
-  if (from) query = query.gte('start_time', from.toISOString());
-  if (to) query = query.lte('start_time', to.toISOString());
-  if (callerOnlyId) query = query.eq('caller_id', callerOnlyId);
+    if (from) query = query.gte('start_time', from.toISOString());
+    if (to) query = query.lte('start_time', to.toISOString());
+    if (callerOnlyId) query = query.eq('caller_id', callerOnlyId);
+    return query;
+  }
 
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+  const first = await run(INTERVIEW_SELECT);
+  if (!first.error) return first.data || [];
+  if (!isMissingAttendanceColumn(first.error)) throw first.error;
+
+  const fallback = await run(INTERVIEW_SELECT_WITHOUT_ATTENDANCE);
+  if (fallback.error) throw fallback.error;
+  return (fallback.data || []).map((row) => ({ ...row, attendance: null }));
 }
 
 export async function createInterview(payload) {
@@ -252,10 +267,14 @@ export async function updateInterview(id, payload) {
   // Stage/caller/job enrichment may be edited before the session.
   // Result + video uploads stay locked until the interview has ended.
   const touchesResult = Object.prototype.hasOwnProperty.call(next, 'result');
+  const touchesAttendance = Object.prototype.hasOwnProperty.call(
+    next,
+    'attendance',
+  );
   const touchesVideo = Object.prototype.hasOwnProperty.call(next, 'video_path');
   const clearingVideo = touchesVideo && !String(next.video_path || '').trim();
   const addingResult =
-    touchesResult || (touchesVideo && !clearingVideo);
+    touchesResult || touchesAttendance || (touchesVideo && !clearingVideo);
 
   if (addingResult) {
     const { data: row, error: readError } = await supabase
@@ -278,8 +297,23 @@ export async function updateInterview(id, payload) {
     .select(INTERVIEW_SELECT)
     .single();
 
-  if (error) throw error;
-  return data;
+  if (!error) return data;
+  if (!isMissingAttendanceColumn(error)) throw error;
+
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'attendance')) {
+    throw new Error(
+      'Attendance column is missing. Run supabase/add_interview_attendance.sql in Supabase.',
+    );
+  }
+
+  const fallback = await supabase
+    .from('interviews')
+    .update(payload)
+    .eq('id', id)
+    .select(INTERVIEW_SELECT_WITHOUT_ATTENDANCE)
+    .single();
+  if (fallback.error) throw fallback.error;
+  return { ...fallback.data, attendance: null };
 }
 
 export async function deleteInterview(id) {

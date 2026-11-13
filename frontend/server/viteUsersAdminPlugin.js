@@ -1,4 +1,4 @@
-import { loadEnv } from 'vite';
+import { getRuntimeEnv } from './runtimeEnv.js';
 
 const USER_ID_CHECK_WINDOW_MS = 15 * 60 * 1000;
 const USER_ID_CHECK_MAX = 20;
@@ -52,10 +52,6 @@ function assertUserIdCheckRateLimit(req) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getEnv(mode) {
-  return loadEnv(mode, process.cwd(), '');
 }
 
 async function assertAllowedAdmin(env, accessToken) {
@@ -228,11 +224,8 @@ async function ensurePublicUserProfile(env, {
   return Array.isArray(upserted) ? upserted[0] : upserted;
 }
 
-export function usersAdminPlugin() {
-  return {
-    name: 'users-admin-api',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
+export function createUsersAdminMiddleware(getEnv = getRuntimeEnv) {
+  return async function usersAdminMiddleware(req, res, next) {
         const path = req.url?.split('?')[0];
         const isSignupProfile = path === '/api/auth/register-profile';
         const isUserIdCheck = path === '/api/auth/user-id-available';
@@ -240,12 +233,11 @@ export function usersAdminPlugin() {
           path === '/api/users/create' || path === '/api/users/delete';
 
         if (!isSignupProfile && !isUserIdCheck && !isAdminUsers) {
-          next();
-          return;
+          return next();
         }
 
         // Re-read env each request (same pattern as Gmail/Drive plugins).
-        const env = getEnv(server.config.mode);
+        const env = getEnv();
 
         if (req.method === 'OPTIONS') {
           res.statusCode = 204;
@@ -488,7 +480,16 @@ export function usersAdminPlugin() {
             error: err?.message || 'User admin request failed.',
           });
         }
-      });
+  };
+}
+
+export function usersAdminPlugin() {
+  return {
+    name: 'users-admin-api',
+    configureServer(server) {
+      server.middlewares.use(
+        createUsersAdminMiddleware(() => getRuntimeEnv()),
+      );
     },
   };
 }

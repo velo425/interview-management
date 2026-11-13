@@ -58,6 +58,12 @@ export const SETTINGS_ACCESS_ROLES = [ROLES.ADMIN, ROLES.TEAM_MEMBER];
 /** Mail: admins manage; team members read-only (same mailbox data as admin). */
 export const MAIL_ACCESS_ROLES = [ROLES.ADMIN, ROLES.TEAM_MEMBER];
 export const USERS_ACCESS_ROLES = [ROLES.ADMIN];
+/** Practice links for all roles; caller directory for admin + team member. */
+export const CALLERS_ACCESS_ROLES = [
+  ROLES.ADMIN,
+  ROLES.CALLER,
+  ROLES.TEAM_MEMBER,
+];
 
 /** @deprecated use SCHEDULE_ACCESS_ROLES / REPORT_ACCESS_ROLES */
 export const INTERVIEW_ACCESS_ROLES = SCHEDULE_ACCESS_ROLES;

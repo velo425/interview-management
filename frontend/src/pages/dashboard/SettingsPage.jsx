@@ -10,10 +10,6 @@ import {
 import { canManageMail, canReadMail } from '../../lib/roles';
 import './SettingsPage.css';
 
-/** Must match Google Cloud → Credentials → Authorized redirect URIs. */
-export const GMAIL_OAUTH_REDIRECT_URI =
-  'http://localhost:5173/api/gmail/oauth/callback';
-
 function formatSyncTime(value) {
   if (!value) return 'Never';
   try {
@@ -283,22 +279,6 @@ function SettingsPage() {
             </table>
           </div>
         )}
-
-        {canManage ? (
-          <div className="settings-setup">
-            <h3>Google Cloud redirect URI</h3>
-            <p>
-              Register this <strong>exact</strong> URI on the InterviewManagement
-              OAuth client (Authorized redirect URIs):
-            </p>
-            <code className="settings-setup__uri">{GMAIL_OAUTH_REDIRECT_URI}</code>
-            <p className="settings-muted">
-              Also add Authorized JavaScript origin:{' '}
-              <code>http://localhost:5173</code>. Use <code>localhost</code>, not{' '}
-              <code>127.0.0.1</code>.
-            </p>
-          </div>
-        ) : null}
 
         {syncQuery ? (
           <details className="settings-query">

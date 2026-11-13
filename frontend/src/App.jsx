@@ -16,6 +16,7 @@ import {
   SCHEDULE_ACCESS_ROLES,
   SETTINGS_ACCESS_ROLES,
   TEAM_ACCESS_ROLES,
+  CALLERS_ACCESS_ROLES,
   USERS_ACCESS_ROLES,
 } from './lib/roles';
 
@@ -23,6 +24,7 @@ const SchedulePage = lazy(() => import('./pages/dashboard/SchedulePage'));
 const ProfilePage = lazy(() => import('./pages/dashboard/ProfilePage'));
 const ReportPage = lazy(() => import('./pages/dashboard/ReportPage'));
 const UsersPage = lazy(() => import('./pages/dashboard/UsersPage'));
+const CallersPage = lazy(() => import('./pages/dashboard/CallersPage'));
 const TeamManagementPage = lazy(
   () => import('./pages/dashboard/TeamManagementPage'),
 );
@@ -171,6 +173,16 @@ function App() {
                 <ProtectedRoute roles={USERS_ACCESS_ROLES}>
                   <Lazy>
                     <UsersPage />
+                  </Lazy>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="callers"
+              element={
+                <ProtectedRoute roles={CALLERS_ACCESS_ROLES}>
+                  <Lazy>
+                    <CallersPage />
                   </Lazy>
                 </ProtectedRoute>
               }

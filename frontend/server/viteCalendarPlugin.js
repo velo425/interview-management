@@ -1,4 +1,3 @@
-import { loadEnv } from 'vite';
 import {
   fetchTokenScopes,
   getGmailOAuthConfig,
@@ -6,7 +5,7 @@ import {
   tokenHasCalendarScope,
 } from './gmailClient.js';
 import { syncCalendarWindow } from './googleCalendar.js';
-import { withGoogleEnvFile } from './googleOAuthConfig.js';
+import { getRuntimeEnv } from './runtimeEnv.js';
 import { decryptSecret, encryptSecret } from './tokenCrypto.js';
 
 const DEFAULT_STAGE = 'Initial Recruiter Screening';
@@ -32,10 +31,6 @@ function sendJson(res, status, payload) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(payload));
-}
-
-function getEnv(mode) {
-  return withGoogleEnvFile(loadEnv(mode, process.cwd(), ''));
 }
 
 function getBearer(req, body = {}) {
@@ -64,8 +59,7 @@ function serviceClient(env) {
   };
 }
 
-async function sb(env, path, options = {}) {
-  const { url, headers } = serviceClient(env);
+async function sbRequest(url, headers, path, options = {}) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
     ...options,
     headers: { ...headers, ...(options.headers || {}) },
@@ -87,6 +81,33 @@ async function sb(env, path, options = {}) {
     throw Object.assign(new Error(message), { status: response.status });
   }
   return data;
+}
+
+async function sb(env, path, options = {}) {
+  const { url, headers } = serviceClient(env);
+  return sbRequest(url, headers, path, options);
+}
+
+/** Interview writes as the signed-in admin so DB triggers see auth.uid()/is_allowed_admin(). */
+async function sbAsUser(env, accessToken, path, options = {}) {
+  const url = env.VITE_SUPABASE_URL;
+  const anon = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !anon || !accessToken) {
+    throw Object.assign(new Error('Missing Supabase user credentials.'), {
+      status: 500,
+    });
+  }
+  return sbRequest(
+    url,
+    {
+      apikey: anon,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    path,
+    options,
+  );
 }
 
 async function assertAdmin(env, accessToken) {
@@ -160,24 +181,53 @@ async function getAccountAccessToken(env, accountId) {
   return refreshed.access_token;
 }
 
+async function findExistingCalendarInterview(env, account, googleEventId) {
+  const encodedId = encodeURIComponent(googleEventId);
+
+  // Prefer the exact account + event pair.
+  const byAccount = await sb(
+    env,
+    `interviews?gmail_account_id=eq.${account.id}&google_event_id=eq.${encodedId}&select=id&limit=1`,
+  );
+  if (Array.isArray(byAccount) && byAccount[0]?.id) {
+    return byAccount[0].id;
+  }
+
+  // Legacy / mismatched rows may have the event id without gmail_account_id.
+  const byEvent = await sb(
+    env,
+    `interviews?google_event_id=eq.${encodedId}&select=id,gmail_account_id&order=created_at.asc`,
+  );
+  if (!Array.isArray(byEvent) || !byEvent.length) return null;
+
+  const sameAccount = byEvent.find((row) => row.gmail_account_id === account.id);
+  return (sameAccount || byEvent[0])?.id || null;
+}
+
 async function upsertCalendarEvent(env, {
   account,
   event,
   createdBy,
+  accessToken,
 }) {
   if (!event?.googleEventId || !account?.id || !account.team_member_id) {
     return { skipped: true };
   }
 
-  const existingRows = await sb(
+  const existingId = await findExistingCalendarInterview(
     env,
-    `interviews?gmail_account_id=eq.${account.id}&google_event_id=eq.${encodeURIComponent(event.googleEventId)}&select=id`,
+    account,
+    event.googleEventId,
   );
-  const existingId = Array.isArray(existingRows) ? existingRows[0]?.id : null;
+  // Prefer admin JWT for writes so restrict_caller_interview_updates allows them.
+  const write = (path, options) =>
+    accessToken
+      ? sbAsUser(env, accessToken, path, options)
+      : sb(env, path, options);
 
   if (event.cancelled) {
     if (existingId) {
-      await sb(env, `interviews?id=eq.${existingId}`, { method: 'DELETE' });
+      await write(`interviews?id=eq.${existingId}`, { method: 'DELETE' });
       return { deleted: true };
     }
     return { skipped: true };
@@ -186,26 +236,31 @@ async function upsertCalendarEvent(env, {
   const googleFields = {
     interview_name: event.interviewName,
     meeting_link: event.meetingLink || '',
-    booking_note: event.bookingNote || '',
     start_time: event.startTime,
     end_time: event.endTime,
-    google_html_link: event.googleHtmlLink || '',
-    google_calendar_id: 'primary',
     google_event_data: event.googleEventData || {},
     source: 'google_calendar',
     invited_member_id: account.team_member_id,
+    google_event_id: event.googleEventId,
+    gmail_account_id: account.id,
   };
 
   if (existingId) {
-    // Refresh Google-sourced fields only; keep app enrichment.
-    await sb(env, `interviews?id=eq.${existingId}`, {
+    // Refresh Google-sourced fields only; keep app enrichment (caller/job/stage/reminder).
+    const patched = await write(`interviews?id=eq.${existingId}`, {
       method: 'PATCH',
       body: JSON.stringify(googleFields),
     });
+    if (!Array.isArray(patched) || !patched.length) {
+      throw Object.assign(
+        new Error(`Failed to update calendar event ${event.googleEventId}.`),
+        { status: 502 },
+      );
+    }
     return { updated: true };
   }
 
-  await sb(env, 'interviews', {
+  await write('interviews', {
     method: 'POST',
     body: JSON.stringify({
       ...googleFields,
@@ -216,14 +271,12 @@ async function upsertCalendarEvent(env, {
       stage: DEFAULT_STAGE,
       reminder_minutes: DEFAULT_REMINDER,
       created_by: createdBy,
-      google_event_id: event.googleEventId,
-      gmail_account_id: account.id,
     }),
   });
   return { created: true };
 }
 
-async function syncAccountCalendar(env, account, createdBy, window) {
+async function syncAccountCalendar(env, account, createdBy, window, accessToken) {
   const token = await getAccountAccessToken(env, account.id);
   // tokeninfo can flake; only hard-fail when it clearly returns scopes without Calendar.
   try {
@@ -271,6 +324,7 @@ async function syncAccountCalendar(env, account, createdBy, window) {
       account,
       event,
       createdBy,
+      accessToken,
     });
     if (result.created) created += 1;
     else if (result.updated) updated += 1;
@@ -289,100 +343,106 @@ async function syncAccountCalendar(env, account, createdBy, window) {
   };
 }
 
+export function createCalendarMiddleware(getEnv = getRuntimeEnv) {
+  return async function calendarMiddleware(req, res, next) {
+    const env = getEnv();
+    const rawUrl = req.url || '';
+    const path = rawUrl.split('?')[0];
+    if (!path.startsWith('/api/calendar')) {
+      return next();
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    try {
+      const body =
+        req.method === 'GET' || req.method === 'HEAD'
+          ? {}
+          : await readJsonBody(req);
+      const accessToken = getBearer(req, body);
+      const profile = await assertAdmin(env, accessToken);
+
+      if (path === '/api/calendar/sync' && req.method === 'POST') {
+        const daysBack = Math.min(30, Math.max(1, Number(body.daysBack) || 7));
+        const daysForward = Math.min(
+          180,
+          Math.max(7, Number(body.daysForward) || 60),
+        );
+        const now = Date.now();
+        const window = {
+          timeMin: new Date(now - daysBack * 24 * 60 * 60 * 1000),
+          timeMax: new Date(now + daysForward * 24 * 60 * 60 * 1000),
+        };
+
+        const accounts = await sb(
+          env,
+          'gmail_accounts?account_kind=eq.member&status=neq.revoked&select=id,team_member_id,gmail_address,status',
+        );
+        const list = Array.isArray(accounts) ? accounts : [];
+        const connected = list.filter(
+          (row) => row.status === 'connected' || row.status === 'error',
+        );
+
+        const results = [];
+        for (const account of connected) {
+          if (!account.team_member_id) {
+            results.push({
+              accountId: account.id,
+              gmailAddress: account.gmail_address,
+              error: 'Account is not linked to a team member.',
+            });
+            continue;
+          }
+          try {
+            const result = await syncAccountCalendar(
+              env,
+              account,
+              profile.id,
+              window,
+              accessToken,
+            );
+            results.push(result);
+          } catch (err) {
+            results.push({
+              accountId: account.id,
+              gmailAddress: account.gmail_address,
+              teamMemberId: account.team_member_id,
+              error: err.message || 'Calendar sync failed.',
+            });
+          }
+        }
+
+        const failed = results.filter((row) => row.error);
+        sendJson(res, failed.length && failed.length === results.length ? 207 : 200, {
+          data: {
+            success: failed.length === 0,
+            accounts: connected.length,
+            results,
+          },
+        });
+        return;
+      }
+
+      sendJson(res, 404, { error: 'Unknown Calendar API route.' });
+    } catch (err) {
+      sendJson(res, err.status || 500, {
+        error: err.message || 'Calendar request failed.',
+      });
+    }
+  };
+}
+
 export function calendarPlugin() {
   return {
     name: 'google-calendar-api',
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const env = getEnv(server.config.mode);
-        const rawUrl = req.url || '';
-        const path = rawUrl.split('?')[0];
-        if (!path.startsWith('/api/calendar')) {
-          next();
-          return;
-        }
-
-        if (req.method === 'OPTIONS') {
-          res.statusCode = 204;
-          res.end();
-          return;
-        }
-
-        try {
-          const body =
-            req.method === 'GET' || req.method === 'HEAD'
-              ? {}
-              : await readJsonBody(req);
-          const accessToken = getBearer(req, body);
-          const profile = await assertAdmin(env, accessToken);
-
-          if (path === '/api/calendar/sync' && req.method === 'POST') {
-            const daysBack = Math.min(30, Math.max(1, Number(body.daysBack) || 7));
-            const daysForward = Math.min(
-              180,
-              Math.max(7, Number(body.daysForward) || 60),
-            );
-            const now = Date.now();
-            const window = {
-              timeMin: new Date(now - daysBack * 24 * 60 * 60 * 1000),
-              timeMax: new Date(now + daysForward * 24 * 60 * 60 * 1000),
-            };
-
-            const accounts = await sb(
-              env,
-              'gmail_accounts?account_kind=eq.member&status=neq.revoked&select=id,team_member_id,gmail_address,status',
-            );
-            const list = Array.isArray(accounts) ? accounts : [];
-            const connected = list.filter(
-              (row) => row.status === 'connected' || row.status === 'error',
-            );
-
-            const results = [];
-            for (const account of connected) {
-              if (!account.team_member_id) {
-                results.push({
-                  accountId: account.id,
-                  gmailAddress: account.gmail_address,
-                  error: 'Account is not linked to a team member.',
-                });
-                continue;
-              }
-              try {
-                const result = await syncAccountCalendar(
-                  env,
-                  account,
-                  profile.id,
-                  window,
-                );
-                results.push(result);
-              } catch (err) {
-                results.push({
-                  accountId: account.id,
-                  gmailAddress: account.gmail_address,
-                  teamMemberId: account.team_member_id,
-                  error: err.message || 'Calendar sync failed.',
-                });
-              }
-            }
-
-            const failed = results.filter((row) => row.error);
-            sendJson(res, failed.length && failed.length === results.length ? 207 : 200, {
-              data: {
-                success: failed.length === 0,
-                accounts: connected.length,
-                results,
-              },
-            });
-            return;
-          }
-
-          sendJson(res, 404, { error: 'Unknown Calendar API route.' });
-        } catch (err) {
-          sendJson(res, err.status || 500, {
-            error: err.message || 'Calendar request failed.',
-          });
-        }
-      });
+      server.middlewares.use(
+        createCalendarMiddleware(() => getRuntimeEnv()),
+      );
     },
   };
 }

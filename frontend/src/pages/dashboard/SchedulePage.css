@@ -41,13 +41,22 @@
   flex-wrap: wrap;
 }
 
+.schedule__cal-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
 .schedule__legend {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   min-height: 34px;
+  min-width: 0;
 }
 
 .schedule__legend-item {
@@ -56,26 +65,20 @@
   gap: 8px;
   border: 1px solid #e2e8f0;
   background: #fff;
-  border-radius: 10px;
-  padding: 6px 10px;
+  border-radius: 999px;
+  padding: 5px 12px 5px 8px;
   cursor: pointer;
   font: inherit;
 }
 
 .schedule__legend-item.is-active {
-  border-color: #2563eb;
-  background: #dbeafe;
-  box-shadow: inset 0 0 0 1px #93c5fd;
-}
-
-.schedule__legend-item.is-active .schedule__legend-name {
-  color: #1e3a8a;
+  box-shadow: inset 0 0 0 1px currentColor;
 }
 
 .schedule__legend-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   flex: 0 0 auto;
 }
 
@@ -571,19 +574,19 @@
   width: 100%;
   height: 36px;
   border: none;
-  border-bottom: 1px solid #f1f5f9;
   background: transparent;
   cursor: pointer;
   padding: 0;
 }
 
+/* XX:00 — solid, strong */
 .week-board__slot.is-hour {
-  border-bottom-color: #e2e8f0;
+  border-top: 1px solid #cbd5e1;
 }
 
+/* XX:30 — dotted, weak */
 .week-board__slot.is-half {
-  border-bottom-style: dashed;
-  border-bottom-color: #f1f5f9;
+  border-top: 1px dotted #dbe2ea;
 }
 
 .week-board__slot:disabled {
@@ -603,66 +606,70 @@
   left: 4px;
   right: 4px;
   border-radius: 8px;
-  background: #dbeafe;
-  border-left: 3px solid var(--blue);
-  padding: 3px 5px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  border: none;
+  padding: 4px 6px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
   overflow: hidden;
   cursor: pointer;
   z-index: 2;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 1px;
+  align-items: flex-start;
+  gap: 4px;
   min-height: 28px;
+  color: #fff;
 }
 
-.week-event__top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+.week-event__body {
+  flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.week-event__icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.95;
+}
+
+.week-event__icon svg {
+  width: 12px;
+  height: 12px;
 }
 
 .week-event strong {
-  flex: 1 1 auto;
+  display: block;
+  width: 100%;
   min-width: 0;
   font-size: 10px;
   font-weight: 700;
-  color: #1e3a8a;
-  line-height: 1.15;
+  color: inherit;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .week-event em {
-  flex: 0 1 auto;
-  max-width: 42%;
+  display: block;
+  width: 100%;
+  max-width: 100%;
   font-size: 10px;
   font-weight: 600;
   font-style: normal;
-  color: #3b82f6;
+  color: inherit;
+  opacity: 0.92;
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: right;
-}
-
-.week-event span {
-  font-size: 9px;
-  color: #3b82f6;
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.week-event__meta {
-  display: block;
-  opacity: 0.95;
+  text-align: left;
 }
 
 .month-board {

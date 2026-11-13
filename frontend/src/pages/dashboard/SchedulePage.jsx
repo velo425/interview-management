@@ -12,14 +12,13 @@ import {
   TIME_FORMATS,
   TIME_ZONES,
   formatDateBySetting,
-  formatTimeBySetting,
   getGmtLabel,
   getTimeZoneParts,
   loadCalendarSettings,
   saveCalendarSettings,
 } from '../../lib/calendarSettings';
 import { collectInterviewReminderToasts } from '../../lib/interviewNotifications';
-import { getCallerColor } from '../../lib/callerColors';
+import { getMemberColor } from '../../lib/callerColors';
 import { getHolidaysForRangeAsync, holidaysOnDay } from '../../lib/holidays';
 import { firstName } from '../../lib/names';
 import {
@@ -28,8 +27,6 @@ import {
   fetchInterviews,
   fetchJobs,
   fetchTeamMembers,
-  interviewAttendeeLabels,
-  interviewOrganizerLabel,
   syncGoogleCalendar,
   updateInterview,
 } from '../../lib/interviewsApi';
@@ -109,7 +106,8 @@ function SchedulePage() {
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [callerFilter, setCallerFilter] = useState('all');
-  const [memberFilter, setMemberFilter] = useState('all');
+  /** Empty = all members. Non-empty = multi-select filter by invited member ids. */
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
   const [toasts, setToasts] = useState([]);
 
   const weekStart = useMemo(() => startOfWeek(anchorDate), [anchorDate]);
@@ -224,7 +222,7 @@ function SchedulePage() {
   }, [settings.country, weekStart, weekEnd, selectedDate]);
 
   const loadData = useCallback(async () => {
-    if (!profile) return;
+    if (!profile) return [];
     setLoading(true);
     setError('');
     try {
@@ -244,8 +242,10 @@ function SchedulePage() {
       setCallers(callerRows);
       setTeamMembers(memberRows);
       setJobs(jobRows);
+      return interviewRows;
     } catch (err) {
       setError(err.message || 'Failed to load schedule.');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -351,7 +351,13 @@ function SchedulePage() {
         (sum, row) => sum + Number(row.updated || 0),
         0,
       );
-      await loadData();
+      const interviewRows = await loadData();
+      if (selectedInterview?.id) {
+        const refreshed = (interviewRows || []).find(
+          (row) => row.id === selectedInterview.id,
+        );
+        if (refreshed) setSelectedInterview(refreshed);
+      }
       setStatus(
         `Calendar sync finished: ${created} new, ${updated} updated` +
           (failed.length
@@ -399,7 +405,12 @@ function SchedulePage() {
   const visibleInterviews = useMemo(() => {
     return interviews.filter((item) => {
       if (callerFilter !== 'all' && item.caller_id !== callerFilter) return false;
-      if (memberFilter !== 'all' && item.invited_member_id !== memberFilter) {
+      if (
+        selectedMemberIds.length > 0 &&
+        !selectedMemberIds.includes(
+          item.invited_member_id || item.invited_member?.id,
+        )
+      ) {
         return false;
       }
 
@@ -413,32 +424,40 @@ function SchedulePage() {
         item.caller?.username?.toLowerCase().includes(q)
       );
     });
-  }, [interviews, callerFilter, memberFilter, search]);
+  }, [interviews, callerFilter, selectedMemberIds, search]);
 
-  // Keep every caller chip visible; selection only highlights (does not rebuild list).
-  const legendCallers = useMemo(() => {
+  // Team-member color badges in the toolbar (multi-select filter).
+  const legendMembers = useMemo(() => {
     const map = new Map();
-    if (callers.length) {
-      for (const caller of callers) {
-        map.set(caller.id, {
-          id: caller.id,
-          name: caller.name || caller.username || 'Caller',
-          color: getCallerColor(caller.id),
-        });
-      }
+    for (const member of teamMembers) {
+      map.set(member.id, {
+        id: member.id,
+        name: firstName(member.name) || member.name || 'Member',
+        color: getMemberColor(member.id),
+      });
     }
     for (const item of interviews) {
-      const id = item.caller_id || item.caller?.id;
+      const id = item.invited_member_id || item.invited_member?.id;
       if (!id || map.has(id)) continue;
       map.set(id, {
         id,
         name:
-          item.caller?.profile?.name || item.caller?.username || 'Caller',
-        color: getCallerColor(id),
+          firstName(item.invited_member?.name) ||
+          item.invited_member?.name ||
+          'Member',
+        color: getMemberColor(id),
       });
     }
     return [...map.values()];
-  }, [callers, interviews]);
+  }, [teamMembers, interviews]);
+
+  function toggleMemberBadge(memberId) {
+    setSelectedMemberIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId],
+    );
+  }
 
   const countryOptions = useMemo(
     () => COUNTRIES.map((country) => ({ value: country.code, label: country.label })),
@@ -507,33 +526,47 @@ function SchedulePage() {
           <span className="schedule__range">{toolbarRangeLabel()}</span>
         </div>
 
-        <div className="schedule__legend" aria-label="Caller colors">
-          {legendCallers.map((caller) => (
-            <button
-              key={caller.id}
-              type="button"
-              className={`schedule__legend-item${
-                callerFilter === caller.id ? ' is-active' : ''
-              }`}
-              onClick={() =>
-                setCallerFilter((current) =>
-                  current === caller.id ? 'all' : caller.id,
-                )
-              }
-              title={
-                callerFilter === caller.id
-                  ? 'Clear caller filter'
-                  : `Filter by ${caller.name}`
-              }
-            >
-              <span
-                className="schedule__legend-swatch"
-                style={{ background: caller.color.border }}
-                aria-hidden="true"
-              />
-              <span className="schedule__legend-name">{caller.name}</span>
-            </button>
-          ))}
+        <div
+          className="schedule__legend"
+          aria-label="Filter by team member (multi-select)"
+        >
+          {legendMembers.map((member) => {
+            const active = selectedMemberIds.includes(member.id);
+            return (
+              <button
+                key={member.id}
+                type="button"
+                className={`schedule__legend-item${active ? ' is-active' : ''}`}
+                style={
+                  active
+                    ? {
+                        borderColor: member.color.border,
+                        background: member.color.bg,
+                      }
+                    : undefined
+                }
+                aria-pressed={active}
+                onClick={() => toggleMemberBadge(member.id)}
+                title={
+                  active
+                    ? `Remove ${member.name} from filter`
+                    : `Add ${member.name} to filter`
+                }
+              >
+                <span
+                  className="schedule__legend-swatch"
+                  style={{ background: member.color.border }}
+                  aria-hidden="true"
+                />
+                <span
+                  className="schedule__legend-name"
+                  style={active ? { color: member.color.text } : undefined}
+                >
+                  {member.name}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="schedule__toolbar-right">
@@ -747,10 +780,25 @@ function SchedulePage() {
               <span>Invited team member</span>
               <div className="setting-card__row">
                 <select
-                  value={memberFilter}
-                  onChange={(e) => setMemberFilter(e.target.value)}
+                  value={
+                    selectedMemberIds.length === 1
+                      ? selectedMemberIds[0]
+                      : selectedMemberIds.length === 0
+                        ? 'all'
+                        : 'multi'
+                  }
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next === 'all') setSelectedMemberIds([]);
+                    else if (next !== 'multi') setSelectedMemberIds([next]);
+                  }}
                 >
                   <option value="all">All members</option>
+                  {selectedMemberIds.length > 1 ? (
+                    <option value="multi">
+                      {selectedMemberIds.length} selected
+                    </option>
+                  ) : null}
                   {teamMembers.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name}
@@ -762,7 +810,8 @@ function SchedulePage() {
           </div>
         </aside>
 
-        {view === 'month' ? (
+        <div className="schedule__cal-stack">
+          {view === 'month' ? (
           <section className="month-board" aria-label="Month calendar">
             {loading ? <div className="week-board__loading">Loading schedule...</div> : null}
             <div className="month-board__weekdays">
@@ -798,15 +847,13 @@ function SchedulePage() {
                     <span className="month-board__date">{day.date.getDate()}</span>
                     <div className="month-board__events">
                       {dayItems.slice(0, 3).map((item) => {
-                        const color = getCallerColor(item.caller_id || item.caller?.id);
-                        const memberLabel = [
-                          item.invited_member?.name,
-                          item.invited_member?.email,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ');
-                        const organizer = interviewOrganizerLabel(item);
-                        const attendees = interviewAttendeeLabels(item);
+                        const color = getMemberColor(
+                          item.invited_member_id || item.invited_member?.id,
+                        );
+                        const memberName =
+                          firstName(item.invited_member?.name) ||
+                          item.invited_member?.name ||
+                          '—';
                         return (
                           <span
                             key={item.id}
@@ -816,20 +863,10 @@ function SchedulePage() {
                               borderLeftColor: color.border,
                               color: color.text,
                             }}
-                            title={[
-                              item.interview_name,
-                              organizer ? `Organizer: ${organizer}` : '',
-                              attendees.length
-                                ? `Attendees: ${attendees.join(', ')}`
-                                : '',
-                              memberLabel,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')}
+                            title={`${item.interview_name} · ${memberName}`}
                           >
-                            {memberLabel
-                              ? `${item.interview_name} · ${firstName(item.invited_member?.name) || item.invited_member?.email}`
-                              : item.interview_name}
+                            {item.interview_name}
+                            {memberName !== '—' ? ` · ${memberName}` : ''}
                           </span>
                         );
                       })}
@@ -953,16 +990,15 @@ function SchedulePage() {
                               ((endMins - startMins) / SLOT_MINUTES) * SLOT_HEIGHT - 4,
                               28,
                             );
-                            const color = getCallerColor(
-                              item.caller_id || item.caller?.id,
+                            const color = getMemberColor(
+                              item.invited_member_id || item.invited_member?.id,
                             );
-                            const organizer = interviewOrganizerLabel(item);
-                            const attendees = interviewAttendeeLabels(item);
-                            const attendeePreview = attendees.slice(0, 2).join(', ');
-                            const attendeeMore =
-                              attendees.length > 2
-                                ? ` +${attendees.length - 2}`
-                                : '';
+                            const memberName =
+                              firstName(item.invited_member?.name) ||
+                              item.invited_member?.name ||
+                              '—';
+                            const showGoogleIcon =
+                              item.source === 'google_calendar';
 
                             return (
                               <article
@@ -971,9 +1007,8 @@ function SchedulePage() {
                                 style={{
                                   top: `${top}px`,
                                   height: `${height}px`,
-                                  background: color.bg,
-                                  borderLeftColor: color.border,
-                                  color: color.text,
+                                  background: color.border,
+                                  color: '#fff',
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -986,53 +1021,18 @@ function SchedulePage() {
                                 }}
                                 role="button"
                                 tabIndex={0}
-                                title={[
-                                  item.interview_name,
-                                  organizer ? `Organizer: ${organizer}` : '',
-                                  attendees.length
-                                    ? `Attendees: ${attendees.join(', ')}`
-                                    : '',
-                                ]
-                                  .filter(Boolean)
-                                  .join('\n')}
+                                title={`${item.interview_name} · ${memberName}`}
                               >
-                                <div className="week-event__top">
-                                  <strong style={{ color: color.text }}>
-                                    {item.interview_name}
-                                  </strong>
-                                  <em style={{ color: color.text }}>
-                                    {firstName(item.invited_member?.name) || '—'}
-                                  </em>
+                                <div className="week-event__body">
+                                  <strong>{item.interview_name}</strong>
+                                  <em>{memberName}</em>
                                 </div>
-                                {organizer ? (
-                                  <span
-                                    className="week-event__meta"
-                                    style={{ color: color.soft }}
-                                  >
-                                    Org: {organizer}
-                                  </span>
-                                ) : null}
-                                {attendees.length ? (
-                                  <span
-                                    className="week-event__meta"
-                                    style={{ color: color.soft }}
-                                  >
-                                    {attendeePreview}
-                                    {attendeeMore}
-                                  </span>
-                                ) : null}
-                                <span style={{ color: color.soft }}>
-                                  {formatTimeBySetting(
-                                    start,
-                                    settings.timeFormat,
-                                    settings.timeZone,
-                                  )}
-                                  {' – '}
-                                  {formatTimeBySetting(
-                                    end,
-                                    settings.timeFormat,
-                                    settings.timeZone,
-                                  )}
+                                <span className="week-event__icon" aria-hidden="true">
+                                  {showGoogleIcon ? (
+                                    <GoogleMarkIcon />
+                                  ) : item.meeting_link ? (
+                                    <VideoMarkIcon />
+                                  ) : null}
                                 </span>
                               </article>
                             );
@@ -1052,6 +1052,7 @@ function SchedulePage() {
             </div>
           </section>
         )}
+        </div>
       </div>
 
       <InterviewDetailModal
@@ -1096,6 +1097,39 @@ function buildMiniMonth(date) {
       inMonth: current.getMonth() === month,
     };
   });
+}
+
+function GoogleMarkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="currentColor" opacity="0.22" />
+      <text
+        x="12"
+        y="16"
+        textAnchor="middle"
+        fontSize="11"
+        fontWeight="800"
+        fill="currentColor"
+        fontFamily="Arial, Helvetica, sans-serif"
+      >
+        G
+      </text>
+    </svg>
+  );
+}
+
+function VideoMarkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="7" width="11" height="10" rx="1.8" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M14 10.2l5.5-2.7v9l-5.5-2.7v-3.6z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function MenuIcon() {

@@ -24,6 +24,7 @@ function Sidebar() {
     mail: MailIcon,
     jobs: JobsIcon,
     users: UsersIcon,
+    callers: CallersIcon,
     settings: SettingsIcon,
   };
 
@@ -163,6 +164,31 @@ function UsersIcon() {
       />
       <path
         d="M19 4v4M17 6h4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function CallersIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 4h6l2 3v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 10h4M9 14h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M15 8h2.5A2.5 2.5 0 0 1 20 10.5v5A2.5 2.5 0 0 1 17.5 18H15"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"

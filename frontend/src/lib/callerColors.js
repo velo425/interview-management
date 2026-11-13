@@ -25,3 +25,8 @@ export function getCallerColor(callerId) {
   const index = hashId(callerId) % CALLER_PALETTE.length;
   return CALLER_PALETTE[index];
 }
+
+/** Same palette, keyed by invited team member id for schedule tickets. */
+export function getMemberColor(memberId) {
+  return getCallerColor(memberId);
+}

@@ -104,7 +104,8 @@ security definer
 set search_path = public
 as $$
 begin
-  if public.is_allowed_admin() then
+  -- service_role (server sync/APIs) and admins may update freely.
+  if coalesce(auth.role(), '') = 'service_role' or public.is_allowed_admin() then
     return new;
   end if;
 
@@ -118,7 +119,6 @@ begin
     or new.invited_member_id is distinct from old.invited_member_id
     or new.job_id is distinct from old.job_id
     or new.meeting_link is distinct from old.meeting_link
-    or new.booking_note is distinct from old.booking_note
     or new.stage is distinct from old.stage
     or new.result is distinct from old.result
     or new.start_time is distinct from old.start_time

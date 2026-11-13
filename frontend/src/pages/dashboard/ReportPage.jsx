@@ -27,6 +27,7 @@ import {
   updateInterview,
   uploadInterviewVideo,
 } from '../../lib/interviewsApi';
+import { getMemberColor } from '../../lib/callerColors';
 import {
   canEditWorkspace,
   interviewCallerScopeId,
@@ -348,6 +349,10 @@ function ReportPage() {
     return canEdit && interviewHasConcluded(item);
   }
 
+  function canEditOutcome(item) {
+    return canEdit && interviewHasConcluded(item);
+  }
+
   return (
     <div className="report-page">
       <header className="report-page__header">
@@ -380,9 +385,76 @@ function ReportPage() {
       ) : null}
 
       <div className="report-page__body">
-        <aside className="report-filters" aria-label="Report filters">
-          <div className="report-filters__head">
-            <strong>Filters</strong>
+        <section className="report-table-panel" aria-label="Interview results">
+          <div className="report-table-panel__toolbar">
+            <div>
+              <h2>Interview results</h2>
+              <p>
+                {loading
+                  ? 'Loading...'
+                  : `${rows.length} interview${rows.length === 1 ? '' : 's'}`}
+              </p>
+            </div>
+          </div>
+
+          <div className="report-filters" aria-label="Report filters">
+            <label className="report-field report-field--search">
+              <span>Search</span>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Name, job, caller..."
+              />
+            </label>
+
+            {showCallerFilter ? (
+              <label className="report-field">
+                <span>Caller</span>
+                <select
+                  value={callerFilter}
+                  onChange={(e) => setCallerFilter(e.target.value)}
+                >
+                  <option value="all">All callers</option>
+                  {filterCallers.map((caller) => (
+                    <option key={caller.id} value={caller.id}>
+                      {caller.name || caller.username}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="report-field">
+              <span>Invited team member</span>
+              <select
+                value={memberFilter}
+                onChange={(e) => setMemberFilter(e.target.value)}
+              >
+                <option value="all">All members</option>
+                {filterMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="report-field">
+              <span>Stage</span>
+              <select
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value)}
+              >
+                <option value="all">All stages</option>
+                {INTERVIEW_STAGES.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {stage}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <button
               type="button"
               className="report-filters__reset"
@@ -397,77 +469,6 @@ function ReportPage() {
             </button>
           </div>
 
-          <label className="report-field">
-            <span>Search</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name, job, caller..."
-            />
-          </label>
-
-          {showCallerFilter ? (
-            <label className="report-field">
-              <span>Caller</span>
-              <select
-                value={callerFilter}
-                onChange={(e) => setCallerFilter(e.target.value)}
-              >
-                <option value="all">All callers</option>
-                {filterCallers.map((caller) => (
-                  <option key={caller.id} value={caller.id}>
-                    {caller.name || caller.username}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <label className="report-field">
-            <span>Invited team member</span>
-            <select
-              value={memberFilter}
-              onChange={(e) => setMemberFilter(e.target.value)}
-            >
-              <option value="all">All members</option>
-              {filterMembers.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="report-field">
-            <span>Stage</span>
-            <select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-            >
-              <option value="all">All stages</option>
-              {INTERVIEW_STAGES.map((stage) => (
-                <option key={stage} value={stage}>
-                  {stage}
-                </option>
-              ))}
-            </select>
-          </label>
-
-        </aside>
-
-        <section className="report-table-panel" aria-label="Interview results">
-          <div className="report-table-panel__toolbar">
-            <div>
-              <h2>Interview results</h2>
-              <p>
-                {loading
-                  ? 'Loading...'
-                  : `${rows.length} interview${rows.length === 1 ? '' : 's'}`}
-              </p>
-            </div>
-          </div>
-
           <div className="report-table-wrap">
             <table className="report-table">
               <thead>
@@ -478,13 +479,15 @@ function ReportPage() {
                   <th>Caller</th>
                   <th>Invited member</th>
                   <th>Stage</th>
+                  <th>Attendance</th>
+                  <th>Result</th>
                   <th>Video</th>
                 </tr>
               </thead>
               <tbody>
                 {!loading && rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="report-table__empty">
+                    <td colSpan={9} className="report-table__empty">
                       No concluded interview results yet. Sessions appear here
                       after their end time.
                     </td>
@@ -499,6 +502,9 @@ function ReportPage() {
                     deletingId === item.id;
                   const hasVideo = Boolean(item.video_path);
                   const progress = uploadProgress[item.id];
+                  const memberId =
+                    item.invited_member_id || item.invited_member?.id;
+                  const memberColor = getMemberColor(memberId);
                   return (
                     <tr key={item.id}>
                       <td>
@@ -537,7 +543,22 @@ function ReportPage() {
                           item.caller?.username ||
                           '—'}
                       </td>
-                      <td>{item.invited_member?.name || '—'}</td>
+                      <td>
+                        {item.invited_member?.name ? (
+                          <span
+                            className="report-member-chip"
+                            style={{
+                              background: memberColor.bg,
+                              borderColor: memberColor.border,
+                              color: memberColor.text,
+                            }}
+                          >
+                            {item.invited_member.name}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td>
                         {canEditStage(item) ? (
                           <select
@@ -557,6 +578,84 @@ function ReportPage() {
                         ) : (
                           <div>
                             <div>{item.stage || DEFAULT_INTERVIEW_STAGE}</div>
+                            {!interviewHasConcluded(item) ? (
+                              <span className="report-table__muted">
+                                Locked until session ends
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {canEditOutcome(item) ? (
+                          <select
+                            className={`report-inline-select report-inline-select--attendance${
+                              item.attendance === 'join'
+                                ? ' is-join'
+                                : item.attendance === 'miss'
+                                  ? ' is-miss'
+                                  : ''
+                            }`}
+                            value={item.attendance || ''}
+                            disabled={busy}
+                            onChange={(e) =>
+                              patchInterview(item, {
+                                attendance: e.target.value || null,
+                              })
+                            }
+                          >
+                            <option value="">Unknown</option>
+                            <option value="join">Join</option>
+                            <option value="miss">Miss</option>
+                          </select>
+                        ) : (
+                          <div>
+                            <div>
+                              {item.attendance === 'join'
+                                ? 'Join'
+                                : item.attendance === 'miss'
+                                  ? 'Miss'
+                                  : '—'}
+                            </div>
+                            {!interviewHasConcluded(item) ? (
+                              <span className="report-table__muted">
+                                Locked until session ends
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {canEditOutcome(item) ? (
+                          <select
+                            className={`report-inline-select report-inline-select--result${
+                              item.result === 'pass'
+                                ? ' is-pass'
+                                : item.result === 'fail'
+                                  ? ' is-fail'
+                                  : ''
+                            }`}
+                            value={item.result || ''}
+                            disabled={busy}
+                            onChange={(e) =>
+                              patchInterview(item, {
+                                result: e.target.value || null,
+                              })
+                            }
+                          >
+                            <option value="">Unknown</option>
+                            <option value="pass">Pass</option>
+                            <option value="fail">Fail</option>
+                          </select>
+                        ) : (
+                          <div>
+                            <div>
+                              {item.result === 'pass'
+                                ? 'Pass'
+                                : item.result === 'fail'
+                                  ? 'Fail'
+                                  : '—'}
+                            </div>
                             {!interviewHasConcluded(item) ? (
                               <span className="report-table__muted">
                                 Locked until session ends

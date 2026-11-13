@@ -18,6 +18,7 @@ begin
     and coalesce(new.video_path, '') = ''
     and new.stage is not distinct from old.stage
     and new.result is not distinct from old.result
+    and new.attendance is not distinct from old.attendance
   then
     return new;
   end if;
@@ -25,6 +26,7 @@ begin
   if
     new.stage is distinct from old.stage
     or new.result is distinct from old.result
+    or new.attendance is distinct from old.attendance
     or new.video_path is distinct from old.video_path
   then
     if old.end_time is null or old.end_time > now() then

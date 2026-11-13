@@ -80,97 +80,18 @@ function compactAttendee(attendee) {
   });
 }
 
-function compactEntryPoint(entry) {
-  if (!entry || typeof entry !== 'object') return undefined;
-  return omitEmpty({
-    type: entry.entryPointType,
-    uri: entry.uri,
-    label: entry.label,
-    pin: entry.pin,
-    accessCode: entry.accessCode,
-    meetingCode: entry.meetingCode,
-    passcode: entry.passcode,
-    password: entry.password,
-  });
-}
-
-function compactAttachment(file) {
-  if (!file || typeof file !== 'object') return undefined;
-  return omitEmpty({
-    title: file.title,
-    fileUrl: file.fileUrl,
-    mimeType: file.mimeType,
-    iconLink: file.iconLink,
-  });
-}
-
-/** Build a display-ready map of non-empty Google Calendar event fields. */
+/**
+ * Persist only fields the app reads (organizer / creator / attendees for UI + Mail).
+ * Avoid storing the full Google Calendar dump in interviews.google_event_data.
+ */
 export function buildGoogleEventData(event = {}) {
-  const start = event.start || {};
-  const end = event.end || {};
-  const conference = event.conferenceData || {};
-  const reminders = event.reminders || {};
-
   return (
     omitEmpty({
-      status: event.status,
-      summary: event.summary,
-      description: event.description,
-      location: event.location,
-      htmlLink: event.htmlLink,
-      hangoutLink: event.hangoutLink,
-      visibility: event.visibility,
-      eventType: event.eventType,
-      transparency: event.transparency,
-      colorId: event.colorId,
-      iCalUID: event.iCalUID,
-      recurringEventId: event.recurringEventId,
-      created: event.created,
-      updated: event.updated,
-      timeZone: start.timeZone || end.timeZone,
-      start: omitEmpty({
-        dateTime: start.dateTime,
-        date: start.date,
-        timeZone: start.timeZone,
-      }),
-      end: omitEmpty({
-        dateTime: end.dateTime,
-        date: end.date,
-        timeZone: end.timeZone,
-      }),
       creator: compactPerson(event.creator),
       organizer: compactPerson(event.organizer),
       attendees: Array.isArray(event.attendees)
         ? event.attendees.map(compactAttendee).filter(Boolean)
         : undefined,
-      conferenceSolution: omitEmpty({
-        name: conference.conferenceSolution?.name,
-        type: conference.conferenceSolution?.key?.type,
-      }),
-      conferenceEntryPoints: Array.isArray(conference.entryPoints)
-        ? conference.entryPoints.map(compactEntryPoint).filter(Boolean)
-        : undefined,
-      conferenceId: conference.conferenceId,
-      attachments: Array.isArray(event.attachments)
-        ? event.attachments.map(compactAttachment).filter(Boolean)
-        : undefined,
-      reminders: omitEmpty({
-        useDefault: reminders.useDefault,
-        overrides: Array.isArray(reminders.overrides)
-          ? reminders.overrides
-              .map((item) =>
-                omitEmpty({
-                  method: item.method,
-                  minutes: item.minutes,
-                }),
-              )
-              .filter(Boolean)
-          : undefined,
-      }),
-      source: omitEmpty({
-        title: event.source?.title,
-        url: event.source?.url,
-      }),
     }) || {}
   );
 }
@@ -189,20 +110,15 @@ export function normalizeCalendarEvent(event) {
     };
   }
 
-  const googleEventData = buildGoogleEventData(event);
-
   return {
     googleEventId: event.id,
     cancelled: false,
     interviewName: String(event.summary || '').trim() || '(No title)',
     meetingLink: extractMeetingLink(event),
-    bookingNote: String(event.description || '').trim(),
-    googleHtmlLink: String(event.htmlLink || ''),
-    location: String(event.location || '').trim(),
     startTime: start.toISOString(),
     endTime: end.toISOString(),
     status: event.status || 'confirmed',
-    googleEventData,
+    googleEventData: buildGoogleEventData(event),
   };
 }
 

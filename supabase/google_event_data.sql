@@ -1,5 +1,6 @@
--- Store full non-empty Google Calendar event payload for Schedule display.
+-- Store slim Google Calendar event payload (organizer / creator / attendees).
 -- Apply in Supabase SQL Editor. Safe to re-run.
+-- Prefer optimize_interview_columns.sql to trim existing rows + drop unused columns.
 
 alter table public.interviews
   add column if not exists google_event_data jsonb not null default '{}'::jsonb;

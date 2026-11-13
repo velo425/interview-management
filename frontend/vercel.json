@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/catchall.js": {
+      "includeFiles": "node_modules/pdfjs-dist/legacy/build/**",
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/api/ping", "destination": "/api/ping" },
+    { "source": "/api/(.*)", "destination": "/api/catchall?__path=$1" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}

@@ -40,6 +40,12 @@ export const NAV_ITEMS = [
     roles: [ROLES.ADMIN],
   },
   {
+    id: 'callers',
+    label: 'Callers',
+    path: '/dashboard/callers',
+    roles: [ROLES.ADMIN, ROLES.CALLER, ROLES.TEAM_MEMBER],
+  },
+  {
     id: 'settings',
     label: 'Settings',
     path: '/dashboard/settings',

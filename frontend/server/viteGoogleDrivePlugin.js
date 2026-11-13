@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { loadEnv } from 'vite';
+import { getRuntimeEnv } from './runtimeEnv.js';
 import {
   assertFileBelongsToInterview,
   buildDriveFileUrl,
@@ -15,9 +15,7 @@ import {
 import {
   GMAIL_OAUTH_REDIRECT_URI,
   getGoogleClientCredentials,
-  getGoogleOAuthEndpoints,
-  withGoogleEnvFile,
-} from './googleOAuthConfig.js';
+  getGoogleOAuthEndpoints} from './googleOAuthConfig.js';
 import { signOAuthState } from './tokenCrypto.js';
 
 const watchTickets = new Map();
@@ -55,10 +53,6 @@ function sendJson(res, status, payload) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(payload));
-}
-
-function getEnv(mode) {
-  return withGoogleEnvFile(loadEnv(mode, process.cwd(), ''));
 }
 
 function getBearerToken(req, body = {}) {
@@ -280,17 +274,13 @@ async function assertAuthenticated(env, accessToken) {
   return assertInterviewVideoAccess(env, accessToken, '');
 }
 
-export function googleDrivePlugin() {
-  return {
-    name: 'google-drive-api',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
+export function createGoogleDriveMiddleware(getEnv = getRuntimeEnv) {
+  return async function middleware(req, res, next) {
         // Re-read .env each request so Connect Drive updates are visible immediately.
-        const env = getEnv(server.config.mode);
+        const env = getEnv();
         const path = req.url?.split('?')[0];
         if (!path?.startsWith('/api/drive/')) {
-          next();
-          return;
+          return next();
         }
 
         if (req.method === 'OPTIONS') {
@@ -721,7 +711,16 @@ export function googleDrivePlugin() {
             error: err.message || 'Google Drive request failed.',
           });
         }
-      });
+      }
+}
+
+export function googleDrivePlugin() {
+  return {
+    name: 'google-drive-api',
+    configureServer(server) {
+      server.middlewares.use(
+        createGoogleDriveMiddleware(() => getRuntimeEnv()),
+      );
     },
   };
 }

@@ -1,6 +1,5 @@
-import { loadEnv } from 'vite';
 import { scrapeJobFromUrl } from './jobScrape.js';
-import { parseResumeFile } from './resumeParse.js';
+import { getRuntimeEnv } from './runtimeEnv.js';
 import {
   assertWorkspaceEditor,
   getBearerToken,
@@ -41,69 +40,77 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+export function createJobScrapeMiddleware(getEnv = getRuntimeEnv) {
+  return async function jobScrapeMiddleware(req, res, next) {
+    const url = req.url?.split('?')[0];
+
+    if (url === '/api/jobs/scrape') {
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method not allowed.' });
+        return;
+      }
+
+      try {
+        const env = getEnv();
+        const body = await readJsonBody(req, { maxBytes: 64 * 1024 });
+        await assertWorkspaceEditor(env, getBearerToken(req, body));
+        const data = await scrapeJobFromUrl(body?.url || body?.job_link);
+        sendJson(res, 200, { data });
+      } catch (err) {
+        sendJson(res, err.status || 400, {
+          error: err?.message || 'Failed to scrape job link.',
+        });
+      }
+      return;
+    }
+
+    if (url === '/api/team/parse-resume') {
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method not allowed.' });
+        return;
+      }
+
+      try {
+        const env = getEnv();
+        const body = await readJsonBody(req);
+        await assertWorkspaceEditor(env, getBearerToken(req, body));
+        // Lazy-load: pdfjs touches DOM APIs and must not load for other routes.
+        const { parseResumeFile } = await import('./resumeParse.js');
+        const data = await parseResumeFile({
+          filename: body?.filename,
+          contentType: body?.contentType,
+          dataBase64: body?.dataBase64,
+        });
+        sendJson(res, 200, { data });
+      } catch (err) {
+        sendJson(res, err.status || 400, {
+          error: err?.message || 'Failed to parse resume.',
+        });
+      }
+      return;
+    }
+
+    return next();
+  };
+}
+
 export function jobScrapePlugin() {
   return {
     name: 'job-scrape-api',
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = req.url?.split('?')[0];
-
-        if (url === '/api/jobs/scrape') {
-          if (req.method === 'OPTIONS') {
-            res.statusCode = 204;
-            res.end();
-            return;
-          }
-          if (req.method !== 'POST') {
-            sendJson(res, 405, { error: 'Method not allowed.' });
-            return;
-          }
-
-          try {
-            const env = loadEnv(server.config.mode, process.cwd(), '');
-            const body = await readJsonBody(req, { maxBytes: 64 * 1024 });
-            await assertWorkspaceEditor(env, getBearerToken(req, body));
-            const data = await scrapeJobFromUrl(body?.url || body?.job_link);
-            sendJson(res, 200, { data });
-          } catch (err) {
-            sendJson(res, err.status || 400, {
-              error: err?.message || 'Failed to scrape job link.',
-            });
-          }
-          return;
-        }
-
-        if (url === '/api/team/parse-resume') {
-          if (req.method === 'OPTIONS') {
-            res.statusCode = 204;
-            res.end();
-            return;
-          }
-          if (req.method !== 'POST') {
-            sendJson(res, 405, { error: 'Method not allowed.' });
-            return;
-          }
-
-          try {
-            const env = loadEnv(server.config.mode, process.cwd(), '');
-            const body = await readJsonBody(req);
-            await assertWorkspaceEditor(env, getBearerToken(req, body));
-            const data = await parseResumeFile({
-              filename: body?.filename,
-              contentType: body?.contentType,
-              dataBase64: body?.dataBase64,
-            });
-            sendJson(res, 200, { data });
-          } catch (err) {
-            sendJson(res, err.status || 400, {
-              error: err?.message || 'Failed to parse resume.',
-            });
-          }
-          return;
-        }
-
-        return next();
-      });
+      server.middlewares.use(
+        createJobScrapeMiddleware(() => getRuntimeEnv()),
+      );
     },
   };
 }

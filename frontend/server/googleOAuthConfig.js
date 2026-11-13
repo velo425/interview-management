@@ -57,10 +57,14 @@ export function readEnvFile(cwd = process.cwd()) {
   return out;
 }
 
-/** Merge Vite loadEnv with .env file so Google keys are never stuck on old process.env. */
+/**
+ * Merge Vite loadEnv with .env file so Google keys are never stuck on old process.env.
+ * On Vercel, process.env / platform env wins — do not let a missing or stale .env override it.
+ */
 export function withGoogleEnvFile(env = {}, cwd = process.cwd()) {
-  const fileEnv = readEnvFile(cwd);
   const merged = { ...env };
+  if (process.env.VERCEL) return merged;
+  const fileEnv = readEnvFile(cwd);
   for (const key of GOOGLE_ENV_KEYS) {
     if (fileEnv[key] !== undefined) merged[key] = fileEnv[key];
   }

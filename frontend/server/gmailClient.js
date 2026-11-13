@@ -91,14 +91,27 @@ export function buildCalendarEventMailQuery(terms = [], { newerThan = '30d' } = 
 export function getGmailOAuthConfig(env) {
   const e = withGoogleEnvFile(env);
   const { clientId, clientSecret } = getGoogleClientCredentials(e);
-  const redirect =
+  const vercelOrigin = process.env.VERCEL_URL
+    ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, '')}`
+    : '';
+  let redirect =
     String(e.GMAIL_OAUTH_REDIRECT_URI || '').trim() || GMAIL_OAUTH_REDIRECT_URI;
+  // On Vercel, never use a localhost redirect — prefer the deployment origin.
+  if (vercelOrigin && (!redirect || /localhost|127\.0\.0\.1/i.test(redirect))) {
+    redirect = `${vercelOrigin}/api/gmail/oauth/callback`;
+  }
   // localhost ≠ 127.0.0.1 for Google OAuth — keep the registered URI.
   const redirectUri = redirect.includes('127.0.0.1')
     ? GMAIL_OAUTH_REDIRECT_URI
     : redirect;
-  const origin = String(e.APP_ORIGIN || '').trim() || APP_ORIGIN;
-  const appOrigin = origin.includes('127.0.0.1') ? APP_ORIGIN : origin;
+  const origin =
+    String(e.APP_ORIGIN || '').trim() || vercelOrigin || APP_ORIGIN;
+  const appOrigin =
+    vercelOrigin && /localhost|127\.0\.0\.1/i.test(origin)
+      ? vercelOrigin
+      : origin.includes('127.0.0.1')
+        ? APP_ORIGIN
+        : origin;
   const tokenSecret = String(
     e.GMAIL_TOKEN_SECRET ||
       e.SUPABASE_SECRET_KEY ||

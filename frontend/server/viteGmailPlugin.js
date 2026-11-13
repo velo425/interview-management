@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import nodePath from 'node:path';
-import { loadEnv } from 'vite';
+import { getRuntimeEnv } from './runtimeEnv.js';
 import {
   buildCalendarEventMailQuery,
   buildGmailAuthUrl,
@@ -26,7 +26,6 @@ import {
   isQuotaError,
   tryAcquireSyncLock,
 } from './gmailRateLimit.js';
-import { withGoogleEnvFile } from './googleOAuthConfig.js';
 import {
   decryptSecret,
   encryptSecret,
@@ -60,10 +59,6 @@ function redirect(res, location) {
   res.statusCode = 302;
   res.setHeader('Location', location);
   res.end();
-}
-
-function getEnv(mode) {
-  return withGoogleEnvFile(loadEnv(mode, process.cwd(), ''));
 }
 
 function getBearer(req, body = {}) {
@@ -883,17 +878,13 @@ function buildConnectionStatuses(members, accounts) {
   });
 }
 
-export function gmailPlugin() {
-  return {
-    name: 'gmail-api',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const env = getEnv(server.config.mode);
+export function createGmailMiddleware(getEnv = getRuntimeEnv) {
+  return async function middleware(req, res, next) {
+        const env = getEnv();
         const rawUrl = req.url || '';
         const path = rawUrl.split('?')[0];
         if (!path.startsWith('/api/gmail')) {
-          next();
-          return;
+          return next();
         }
 
         if (req.method === 'OPTIONS') {
@@ -1869,7 +1860,16 @@ export function gmailPlugin() {
             error: err.message || 'Gmail request failed.',
           });
         }
-      });
+      }
+}
+
+export function gmailPlugin() {
+  return {
+    name: 'gmail-api',
+    configureServer(server) {
+      server.middlewares.use(
+        createGmailMiddleware(() => getRuntimeEnv()),
+      );
     },
   };
 }
